@@ -1,0 +1,4 @@
+vllm==0.5.4
+transformers==4.43.2
+flash-attn
+scipy
