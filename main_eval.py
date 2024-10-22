@@ -21,6 +21,7 @@ from vllm.distributed.parallel_state import destroy_model_parallel, destroy_dist
 from utils import compute_acc, compute_pointwise_metrics, compute_classification_metrics                # compute metrics
 from utils import VALID_PAIR_EVAL_DATASETS, VALID_POINT_EVAL_DATASETS, VALID_CLASS_EVAL_DATASETS        # list of valid datasets
 from prompt_utils import get_prompt, get_prompt_point, get_prompt_classification                     
+from data_utils import load_eval_dataset # loads datasets
 
 HF_TOKEN = os.getenv("HF_TOKEN", None)
 if HF_TOKEN is not None:
@@ -41,21 +42,6 @@ DATASET_TO_TASK = {
     "biggen_bench":         "point",
     "llm-aggrefact":        "class",
     "info_bench_expert":    "class",
-}
-
-EVAL_DATASET_TO_PATH = {
-    "auto_j":               "./data/autoj/testdata_pairwise.jsonl",
-    "instrusum":            "./data/instrusum/instrusum_acc.jsonl",
-    "hhh":                  "./data/hhh/",
-    "preference_bench":     "./data/preference_bench/raw_preference_data.jsonl",
-    "eval_bias_bench":      "./data/evalbiasbench/",
-    "lfqa_eval":            "./data/lfqa-eval/lfqa_eval_experts_processed.jsonl",
-    "flask":                "./data/flask/flask_raw_data.jsonl",
-    "mt_bench":             "./data/mt_bench_single/mt_bench_raw_data.jsonl",
-    "feedback_bench":       "./data/feedback_bench/feedback_bench_raw_data.jsonl",
-    "biggen_bench":         "./data/biggen-bench",
-    "llm-aggrefact":        "./data/llm-aggrefact/llm-aggrefact-split-test.jsonl",
-    "info_bench_expert":    "./data/infobench-class/expert_all_agree.jsonl",
 }
 
 LLAMA2_TEMPLATE="[INST] {input} [/INST]" # for Auto-J
@@ -137,17 +123,6 @@ def main(args):
 
         task_type = DATASET_TO_TASK[eval_dataset] # Get if pairwise, pointwise (rating), or classification task
 
-        generation_path = EVAL_DATASET_TO_PATH[eval_dataset] # Get path to dataset
-
-        # Check if there's one file in generation path or if there's multiple
-        # Multiple files = benchmark has different subsets
-
-        # Get a name for dataset subset for storing results, else just use dataset name
-        if '.jsonl' in generation_path: # one file
-            generation_fname = generation_path.split('/')[-1].split('.jsonl')[0]
-        else:
-            generation_fname = eval_dataset
-
         # Get appropriate prompt based on eval dataset and particular models
         if task_type == 'pair':
             prompt, prompt_name, get_prediction = get_prompt(eval_dataset, model_modifier)
@@ -161,58 +136,48 @@ def main(args):
         # Load dataset(s)
         output_path_template = args.output_path
         output_paths = []
+        datasets = []
 
         # One file in eval set / benchmark has no subsets
-        print(f"Loading dataset: {generation_fname}")
-        if os.path.exists(generation_path) and os.path.isfile(generation_path):
-            with open(generation_path, 'r') as fr:
-                generation_dataset = [json.loads(line) for line in fr.readlines()]
+        print(f"Loading dataset: {eval_dataset}")
+        loaded_datasets = load_eval_dataset(eval_dataset)
 
-            # Debug: Only 10 samples from dataset
-            if args.debug:
-                generation_dataset = generation_dataset[:10]
+        if loaded_datasets == None:
+            print(f"Failed to load {eval_dataset}!")
 
-            datasets = [generation_dataset]
-            output_path_format = output_path_template.format(
-                dataset_name=eval_dataset,
-                prompt=prompt_name,
-                signature=generation_fname
-            )
-            output_paths.append(output_path_format)
-
-        # Multiple subsets in benchmark, load each subset separately
-        elif os.path.exists(generation_path) and os.path.isdir(generation_path):
-            data_files = list(glob.glob(f"{generation_path}/*.jsonl"))
-            datasets = []
-            for df in data_files:
-                split_name = df.split('/')[-1].split('.jsonl')[0]
-                with open(df, 'r') as fr:
-                    generation_dataset = [json.loads(line) for line in fr.readlines()]
-                    
-                    # Debug: Only 10 samples from dataset
-                    if args.debug:
-                        generation_dataset = generation_dataset[:10]
-                    datasets.append(generation_dataset)
-
+         # Multiple subsets in benchmark, load each subset separately. load_dataset returns {split_name: hf_dataset} dict
+        elif isinstance(loaded_datasets, dict):
+            for split_name, generation_dataset in loaded_datasets.items():
+                datasets.append(generation_dataset)
                 output_path_format = output_path_template.format(
                     dataset_name=eval_dataset,
                     prompt=prompt_name,
-                    signature=generation_fname
+                    signature=split_name
                 )
 
                 base_dir, fname = output_path_format.split(f'/eval_result/{eval_dataset}/') 
                 output_path_format = base_dir + f'/eval_result/{eval_dataset}/{split_name}-' + fname
 
                 output_paths.append(output_path_format)
+        
+        else:
+            datasets.append(loaded_datasets)
+            output_path_format = output_path_template.format(
+                dataset_name=eval_dataset,
+                prompt=prompt_name,
+                signature=eval_dataset
+            )
+            output_paths.append(output_path_format)
+
 
         print(f'PROCESSING {eval_dataset} | TASK_TYPE: {task_type} | OUTPUT PATHS: {output_paths}')
         for generation_dataset, output_path in zip(datasets, output_paths):
+            if args.debug:
+                generation_dataset = generation_dataset.select(range(10))
 
             output_dir = os.path.dirname(output_path)
             if not os.path.exists(output_dir):
                 os.makedirs(output_dir)
-
-            generation_dataset = Dataset.from_list(generation_dataset)
             
             if task_type == 'pair':
 
@@ -282,36 +247,11 @@ def main(args):
 
             elif task_type == 'point':
                 def process_example(generation):
-
-                    # BiGGen Bench had rubrics formatted differently
-                    if eval_dataset == 'biggen_bench':
-                        generation_rubric = generation['score_rubric']
-
-                        rubric_prompt = """
-                        [{orig_criteria}]
-                        Score 1: {orig_score1_description}
-                        Score 2: {orig_score2_description}
-                        Score 3: {orig_score3_description}
-                        Score 4: {orig_score4_description}
-                        Score 5: {orig_score5_description}
-                        """.strip()
-                        
-                        rubric = rubric_prompt.format(
-                            orig_criteria = generation_rubric['criteria'],
-                            orig_score1_description = generation_rubric['score1_description'],
-                            orig_score2_description = generation_rubric['score2_description'],
-                            orig_score3_description = generation_rubric['score3_description'],
-                            orig_score4_description = generation_rubric['score4_description'],
-                            orig_score5_description = generation_rubric['score5_description'],
-                        )
-                    else:
-                        rubric = generation['rubric'] 
-
                     content = prompt.format(
                         instruction=generation['input'],
                         response=generation['response'],
                         reference_answer=generation['reference_answer'],
-                        rubric = rubric
+                        rubric = generation['rubric'] 
                     )
                             
                     messages = [

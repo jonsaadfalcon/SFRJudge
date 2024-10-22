@@ -50,9 +50,8 @@ def process_pairwise(args):
             continue
 
         # get dataset file
-
         data_files = list(glob.glob(f"{eval_path}/*.evaluation.json"))
-        print(eval_path)
+        data_files = [os.path.basename(df) for df in data_files] # handles relative path
         if len(data_files) == 1:
             eval_results = read_json(os.path.join(eval_path, data_files[0]))
             if args.acc_type == 'best':
@@ -74,26 +73,25 @@ def process_pairwise(args):
             # compute microaverage for datasets with subsets
             if ds == 'eval_bias_bench':
                 split_to_score = {
-                    'biasbench_content_continuation': 12,
-                    'biasbench_concreteness': 14,
-                    'biasbench_nested_instruction': 12,
-                    'biasbench_familiar_knowledge_preference_bias': 12,
-                    'biasbench_empty_reference': 13,
-                    'biasbench_length_bias': 17,
+                    'content_continuation': 12,
+                    'concreteness': 14,
+                    'nested_instruction': 12,
+                    'familiar_knowledge_preference_bias': 12,
+                    'empty_reference': 13,
+                    'length_bias': 17,
                 }
             elif ds == 'hhh':
                 split_to_score = {
-                    "hhh_other": 43,
-                    "hhh_honest": 61,
-                    "hhh_harmless": 58,
-                    "hhh_helpful": 59,
+                    "other": 43,
+                    "honest": 61,
+                    "harmless": 58,
+                    "helpful": 59,
                 }
             else:
                 split_to_score = defaultdict(lambda: 1)
 
             for df in data_files:
                 split_name = df.split('/')[-1].split('-')[0]
-                print(split_name)
                 
                 eval_results = read_json(os.path.join(eval_path, df))
                 if args.acc_type == 'best':
@@ -134,6 +132,7 @@ def process_pointwise(args):
 
         # get dataset file
         data_files = list(glob.glob(f"{eval_path}/*.evaluation.json"))
+        data_files = [os.path.basename(df) for df in data_files]
         if len(data_files) == 1:
             eval_results = read_json(os.path.join(eval_path, data_files[0]))
             ds_eval['overall'] = eval_results
@@ -229,18 +228,18 @@ def compile_leaderboard(args):
                 ds = f'pointwise-{dsname}'
 
                 if 'gpt4_pearson' in leaderboard[ds]:
-                    if dsname == 'biggen_bench':
-                        scores.append(leaderboard[ds]['gpt4_pearson'])
+                    score = leaderboard[ds]['gpt4_pearson']
+                    if isinstance(score, list):
+                        scores.append(score[0])
                     else:
-                        scores.append(leaderboard[ds]['gpt4_pearson'][0])
-
+                        scores.append(score)
+                
                 if 'human_pearson' in leaderboard[ds]:
-                    if dsname == 'biggen_bench':
-                        scores.append(leaderboard[ds]['human_pearson'])
+                    score = leaderboard[ds]['human_pearson']
+                    if isinstance(score, list):
+                        scores.append(score[0])
                     else:
-                        scores.append(leaderboard[ds]['human_pearson'][0])
-                print(ds)
-                print(scores)
+                        scores.append(score)
 
             leaderboard['average_pointwise'] = np.average(scores)
     
@@ -263,4 +262,3 @@ if __name__ == "__main__":
         process_pointwise(args)
 
     compile_leaderboard(args)
-

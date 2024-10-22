@@ -1,6 +1,6 @@
 # SFRJudge
 
-This is the official repository for [Direct Judgement Preference Optimization](https://arxiv.org/abs/2409.14664). This repo contains code to run evaluation on 12 benchmarks featured in the paper. To run evaluation on RewardBench, please see the [RewardBench repo](https://github.com/allenai/reward-bench).
+This is the official repository for [Direct Judgement Preference Optimization](https://arxiv.org/abs/2409.14664). This repo currently contains code to run evaluation on 12 benchmarks featured in the paper. To run evaluation on RewardBench, please see the [RewardBench repo](https://github.com/allenai/reward-bench).
 
 The contents of this repository are intended for research purposes only.
 
@@ -21,6 +21,7 @@ pip install -r requirements.txt
 See `run_eval.sh` for examples. Alternatively, you can run
 
 ```
+export HF_TOKEN=<your_hf_token>
 python -u main_eval.py \
     --model [model_name (Huggingface or local)] \
     --num_gpus [num_gpus] \
@@ -30,7 +31,7 @@ python -u main_eval.py \
     --top_p [sampling parameter top_p] \
 ```
 
-Here, you can specify which datasets to run evaluation on, or specify `all` to run all datasets, or `all_pair`, `all_point`, or `all_class` to run all pairwise, pointwise (single rating), and classification datasets, respectively.
+Here, you can specify which datasets to run evaluation on, or specify `all` to run all datasets, or `all_pair`, `all_point`, or `all_class` to run all pairwise, pointwise (single rating), and classification datasets, respectively. Some evaluation datasets are be gated on HuggingFace and/or hosted on Google Drive. Please request access with the original dataset authors accordingly. 
 
 After evaluation is finished, you can aggregate your results by running `aggregate_eval.py`
 ```
@@ -39,8 +40,7 @@ python aggregate_eval.py \
     --type [all, pair, point, point_no_class] \ 
 ```
 
-
-:warning: To get an accurate Pairwise average, this script expects you to run evaluation on RewardBench, then store results in `[output_path]/rewardbench/scores.json`. The json file should contain a key titled `leaderboard` with a corresponding dict that has the scores of each section and a key `overall_score` for the overall RewardBench score. Alternatively, you can recompute the average by taking the average produced by this script without RewardBench by (6*script_avg_no_rb + rb_score)/7.
+:warning: To get a pairwise average that includes RewardBench, this script expects you to run evaluation on RewardBench, then store results in `[output_path]/rewardbench/scores.json`. The json file should contain a key titled `leaderboard` with a corresponding dict that has the scores of each section and a key `overall_score` for the overall RewardBench score, a value between 0 and 1. Alternatively, you can recompute the average by taking the average produced by this script without RewardBench by (6*script_avg_no_rb + rb_score)/7.
 
 ```
 "leaderboard": {
@@ -52,6 +52,7 @@ python aggregate_eval.py \
 }
 ```
 
+The scores reported in our paper were obtained by running evaluation with 8xA100 40GB GPUs. 
 
 ## Citation
 ```
