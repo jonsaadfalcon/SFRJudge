@@ -8,7 +8,7 @@ import numpy as np
 from datasets import Dataset, load_dataset, concatenate_datasets
 
 VALID_PAIR_EVAL_DATASETS = ["auto_j", "instrusum", "hhh", "preference_bench", "eval_bias_bench", "lfqa_eval"]
-VALID_POINT_EVAL_DATASETS = ["flask", "mt_bench", "feedback_bench", "biggen_bench"]
+VALID_POINT_EVAL_DATASETS = ["flask", "mt_bench", "feedback_bench", "biggen_bench", "polaris_evals"]
 VALID_CLASS_EVAL_DATASETS = ["llm-aggrefact", "info_bench_expert"]
 
 MAX_RETRIES = 10 # max num times to try and get dataset from github sources via requests
@@ -292,6 +292,22 @@ def load_eval_dataset(eval_dataset):
             return hf_dataset
         else:
             return None
+
+    elif eval_dataset == 'polaris_evals':
+        jsonl_path = "/env/lib/repos/jon/Expanded_RAG_Evaluation/human_annotated_samples/Polaris_prepared_for_SFR_Judge.jsonl"
+        hf_dataset = Dataset.from_json(jsonl_path)
+        
+        def process_example(example):
+            return {
+                'input': example['query'],
+                'response': example['response'],
+                'reference_answer': example['document'],
+                'rubric': example['instruction'],
+                'human_score': example['human_score']
+            }
+            
+        hf_dataset = hf_dataset.map(process_example)
+        return hf_dataset
 
     elif eval_dataset == 'feedback_bench':
         ds_raw = load_dataset('prometheus-eval/Feedback-Bench', split='train')
